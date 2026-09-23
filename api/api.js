@@ -734,6 +734,9 @@ app.use((req, res, next) => {
 
 app.use(express.json({ limit: "1mb" }));
 
+app.get("/", (req, res) => res.json({ ok: true, service: "stratus-api" }));
+app.get("/health", (req, res) => res.json({ ok: true }));
+
 app.use((req, res, next) => {
   const ip = getClientIp(req);
 
@@ -1152,7 +1155,7 @@ setInterval(() => {
   }
 }, 60_000).unref?.();
 
-httpServer.listen(PORT, () => {
+httpServer.listen(PORT, "0.0.0.0", () => {
   const label = (s) => chalk.dim(s.padStart(12));
   const siteList = Object.entries(sites.sites);
 
