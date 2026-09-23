@@ -105,27 +105,61 @@ async function getVerificationCode(mailJwt, maxRetries = 30) {
     Authorization: `Bearer ${mailJwt}`,
     "Content-Type": "application/json",
   };
+
   for (let i = 0; i < maxRetries; i++) {
     await new Promise((r) => setTimeout(r, 3000));
     try {
-      const res = await fetchWithTimeout("https://api.mail.tm/messages?page=1", {
-        headers,
-      });
-      const data = await res.json();
-      if (data["hydra:member"]?.length > 0) {
-        const msgId = data["hydra:member"][0].id;
-        const full = await (
-          await fetchWithTimeout(`https://api.mail.tm/messages/${msgId}`, {
-            headers,
-          })
-        ).json();
-        const match = (full.text || full.html || "")
-          .replace(/<[^>]*>/g, "")
-          .match(/\b\d{6}\b/);
-        if (match) return match[0];
+      const res = await fetchWithTimeout(
+        "https://api.mail.tm/messages?page=1",
+        { headers },
+        10_000,
+      );
+      if (!res.ok) {
+        logSys(chalk.yellow(`mail.tm messages → HTTP ${res.status}`));
+        continue;
       }
-    } catch {}
+
+      const data = await res.json();
+      for (const message of data["hydra:member"] || []) {
+        if (!message.id) continue;
+
+        const fullRes = await fetchWithTimeout(
+          `https://api.mail.tm/messages/${encodeURIComponent(message.id)}`,
+          { headers },
+          10_000,
+        );
+        if (!fullRes.ok) continue;
+
+        const full = await fullRes.json();
+
+        // Mail.tm returns html as an array on message objects.
+        // The previous code called .replace() on that array, threw,
+        // swallowed the error, and never found the verification code.
+        const html = Array.isArray(full.html)
+          ? full.html.join("\\n")
+          : typeof full.html === "string"
+            ? full.html
+            : "";
+        const text = typeof full.text === "string" ? full.text : "";
+        const intro = typeof full.intro === "string" ? full.intro : "";
+        const subject = typeof full.subject === "string" ? full.subject : "";
+
+        const body = [subject, intro, text, html]
+          .filter(Boolean)
+          .join("\\n")
+          .replace(/<[^>]*>/g, " ");
+
+        const match = body.match(/\\b\\d{6}\\b/);
+        if (match) {
+          logSys(chalk.green("mail.tm verification code received"));
+          return match[0];
+        }
+      }
+    } catch (e) {
+      logSys(chalk.yellow(`mail.tm poll retry: ${e.message}`));
+    }
   }
+
   throw new Error("Timeout getting verification code");
 }
 
