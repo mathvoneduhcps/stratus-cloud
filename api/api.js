@@ -244,13 +244,21 @@ async function createAccountRaw() {
     os: "web",
   };
 
-  await raccoonFetch("/users/sendEmail", {
+  logSys(chalk.gray(`account: requesting verification email for ${email}`));
+  const sendRes = await raccoonFetch("/users/sendEmail", {
     method: "POST",
     headers: h,
     body: new URLSearchParams({ email, type: "register", ...base }),
   });
+  const sendText = await sendRes.text();
+  logSys(chalk.gray(`account: sendEmail → HTTP ${sendRes.status}${sendText ? ` — ${sendText.slice(0, 500)}` : ""}`));
+  if (!sendRes.ok) {
+    throw new Error(`Raccoon sendEmail failed (HTTP ${sendRes.status})`);
+  }
 
+  logSys(chalk.gray("account: waiting for verification email"));
   const code = await getVerificationCode(mailJwt);
+  logSys(chalk.green("account: verification code received"));
 
   await raccoonFetch("/users/emailRegister", {
     method: "POST",
@@ -818,6 +826,11 @@ app.get("/cloud/v1/embed-data", (req, res) => {
 });
 
 app.post("/cloud/v1/createSession", auth, async (req, res) => {
+  // Account creation can legitimately take longer than the normal 30s API timeout
+  // because it waits for email verification. Keep this streaming request alive.
+  req.setTimeout(180_000);
+  res.setTimeout(180_000);
+
   const { game_key } = req.body;
   if (!game_key || typeof game_key !== "string" || game_key.length > 256) {
     return res.status(400).json({ error: "Invalid game_key." });
